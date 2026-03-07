@@ -1389,21 +1389,26 @@ impl Simd for Neon {
 
 	#[inline(always)]
 	fn widening_mul_u32s(self, a: Self::u32s, b: Self::u32s) -> (Self::u32s, Self::u32s) {
-		#[inline(always)]
-		fn widen_mul(a: u32, b: u32) -> (u32, u32) {
-			let a = a as u64;
-			let b = b as u64;
-			let c = a * b;
+		unsafe {
+			let a_neon: uint32x4_t = core::mem::transmute(a);
+			let b_neon: uint32x4_t = core::mem::transmute(b);
 
-			(c as u32, (c >> 32) as u32)
+			let a_lo = vget_low_u32(a_neon);
+			let a_hi = vget_high_u32(a_neon);
+			let b_lo = vget_low_u32(b_neon);
+			let b_hi = vget_high_u32(b_neon);
+
+			// Widening multiply: 2x u32 -> 2x u64
+			let prod_lo = vmull_u32(a_lo, b_lo);
+			let prod_hi = vmull_u32(a_hi, b_hi);
+
+			// Low 32 bits of each product
+			let lo = vcombine_u32(vmovn_u64(prod_lo), vmovn_u64(prod_hi));
+			// High 32 bits of each product
+			let hi = vcombine_u32(vshrn_n_u64::<32>(prod_lo), vshrn_n_u64::<32>(prod_hi));
+
+			(core::mem::transmute(lo), core::mem::transmute(hi))
 		}
-
-		let (c0, d0) = widen_mul(a.0, b.0);
-		let (c1, d1) = widen_mul(a.1, b.1);
-		let (c2, d2) = widen_mul(a.2, b.2);
-		let (c3, d3) = widen_mul(a.3, b.3);
-
-		(u32x4(c0, c1, c2, c3), u32x4(d0, d1, d2, d3))
 	}
 
 	#[inline(always)]
@@ -2341,21 +2346,26 @@ impl Simd for NeonFcma {
 
 	#[inline(always)]
 	fn widening_mul_u32s(self, a: Self::u32s, b: Self::u32s) -> (Self::u32s, Self::u32s) {
-		#[inline(always)]
-		fn widen_mul(a: u32, b: u32) -> (u32, u32) {
-			let a = a as u64;
-			let b = b as u64;
-			let c = a * b;
+		unsafe {
+			let a_neon: uint32x4_t = core::mem::transmute(a);
+			let b_neon: uint32x4_t = core::mem::transmute(b);
 
-			(c as u32, (c >> 32) as u32)
+			let a_lo = vget_low_u32(a_neon);
+			let a_hi = vget_high_u32(a_neon);
+			let b_lo = vget_low_u32(b_neon);
+			let b_hi = vget_high_u32(b_neon);
+
+			// Widening multiply: 2x u32 -> 2x u64
+			let prod_lo = vmull_u32(a_lo, b_lo);
+			let prod_hi = vmull_u32(a_hi, b_hi);
+
+			// Low 32 bits of each product
+			let lo = vcombine_u32(vmovn_u64(prod_lo), vmovn_u64(prod_hi));
+			// High 32 bits of each product
+			let hi = vcombine_u32(vshrn_n_u64::<32>(prod_lo), vshrn_n_u64::<32>(prod_hi));
+
+			(core::mem::transmute(lo), core::mem::transmute(hi))
 		}
-
-		let (c0, d0) = widen_mul(a.0, b.0);
-		let (c1, d1) = widen_mul(a.1, b.1);
-		let (c2, d2) = widen_mul(a.2, b.2);
-		let (c3, d3) = widen_mul(a.3, b.3);
-
-		(u32x4(c0, c1, c2, c3), u32x4(d0, d1, d2, d3))
 	}
 
 	#[inline(always)]
@@ -3586,6 +3596,26 @@ mod tests {
 				assert_eq!(dst[2], simd.add_f32x4(dst[0], simd.splat_f32x4(0.2)));
 				assert_eq!(dst[3], simd.add_f32x4(dst[0], simd.splat_f32x4(0.3)));
 				assert_eq!(src, simd.interleave_shfl_f32s(dst));
+			}
+		}
+	}
+
+	#[test]
+	fn test_neon_widening_mul_u32s() {
+		if let Some(simd) = Neon::try_new() {
+			let a = u32x4(0xFFFFFFFF, 0x80000000, 12345, 0);
+			let b = u32x4(2, 3, 67890, 1);
+			let (lo, hi) = simd.widening_mul_u32s(a, b);
+
+			// Reference: scalar u64 multiply
+			for i in 0..4 {
+				let a_i = [a.0, a.1, a.2, a.3][i] as u64;
+				let b_i = [b.0, b.1, b.2, b.3][i] as u64;
+				let prod = a_i * b_i;
+				let lo_i = [lo.0, lo.1, lo.2, lo.3][i];
+				let hi_i = [hi.0, hi.1, hi.2, hi.3][i];
+				assert_eq!(lo_i, prod as u32, "lo mismatch at lane {i}");
+				assert_eq!(hi_i, (prod >> 32) as u32, "hi mismatch at lane {i}");
 			}
 		}
 	}
