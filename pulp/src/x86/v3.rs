@@ -4373,4 +4373,88 @@ impl V3 {
 
 		(cast!(ab_lo), cast!(ab_hi))
 	}
+
+	/// Interleave the 128-bit halves of two `u32x8` vectors.
+	///
+	/// Given `a = [a0 a1 a2 a3 | a4 a5 a6 a7]` and `b = [b0 b1 b2 b3 | b4 b5 b6 b7]`,
+	/// returns `([a0 a1 a2 a3 | b0 b1 b2 b3], [a4 a5 a6 a7 | b4 b5 b6 b7])`.
+	///
+	/// Useful for NTT butterfly operations at stride 4 (processing 4 elements per half-lane).
+	#[inline(always)]
+	pub fn interleave4_u32x8(self, ab: [u32x8; 2]) -> [u32x8; 2] {
+		[
+			cast!(self.avx._mm256_permute2f128_si256::<0b0010_0000>(
+				cast!(ab[0]),
+				cast!(ab[1]),
+			)),
+			cast!(self.avx._mm256_permute2f128_si256::<0b0011_0001>(
+				cast!(ab[0]),
+				cast!(ab[1]),
+			)),
+		]
+	}
+
+	/// Broadcast twiddle factors for stride-4 NTT stages.
+	///
+	/// Given `w = [w0, w1]`, returns `[w0 w0 w0 w0 | w1 w1 w1 w1]`.
+	#[inline(always)]
+	pub fn permute4_u32x8(self, w: [u32; 2]) -> u32x8 {
+		let w0 = self.sse2._mm_set1_epi32(w[0] as i32);
+		let w1 = self.sse2._mm_set1_epi32(w[1] as i32);
+		cast!(self.avx._mm256_insertf128_si256::<1>(self.avx._mm256_castsi128_si256(w0), w1))
+	}
+
+	/// Interleave the 64-bit halves of two `u32x8` vectors.
+	///
+	/// Given `a = [a0 a1 | a2 a3 | a4 a5 | a6 a7]` and `b = [b0 b1 | b2 b3 | b4 b5 | b6 b7]`,
+	/// returns `([a0 a1 b0 b1 | a4 a5 b4 b5], [a2 a3 b2 b3 | a6 a7 b6 b7])`.
+	///
+	/// Useful for NTT butterfly operations at stride 2 (processing 2 elements per quarter-lane).
+	#[inline(always)]
+	pub fn interleave2_u32x8(self, ab: [u32x8; 2]) -> [u32x8; 2] {
+		[
+			cast!(self.avx2._mm256_unpacklo_epi64(cast!(ab[0]), cast!(ab[1]))),
+			cast!(self.avx2._mm256_unpackhi_epi64(cast!(ab[0]), cast!(ab[1]))),
+		]
+	}
+
+	/// Broadcast twiddle factors for stride-2 NTT stages.
+	///
+	/// Given `w = [w0, w1, w2, w3]`, returns `[w0 w0 | w1 w1 | w2 w2 | w3 w3]`.
+	#[inline(always)]
+	pub fn permute2_u32x8(self, w: [u32; 4]) -> u32x8 {
+		let w0123: __m128i = cast!(w);
+		let w0022 = self.sse2._mm_castps_si128(self.sse3._mm_moveldup_ps(cast!(w0123)));
+		let w1133 = self.sse2._mm_castps_si128(self.sse3._mm_movehdup_ps(cast!(w0123)));
+		cast!(self.avx._mm256_insertf128_si256::<1>(self.avx._mm256_castsi128_si256(w0022), w1133))
+	}
+
+	/// Interleave the 32-bit elements of two `u32x8` vectors.
+	///
+	/// Given `a = [a0 a1 a2 a3 a4 a5 a6 a7]` and `b = [b0 b1 b2 b3 b4 b5 b6 b7]`,
+	/// returns `([a0 b0 a2 b2 a4 b4 a6 b6], [a1 b1 a3 b3 a5 b5 a7 b7])`.
+	///
+	/// Useful for NTT butterfly operations at stride 1 (processing adjacent element pairs).
+	#[inline(always)]
+	pub fn interleave1_u32x8(self, ab: [u32x8; 2]) -> [u32x8; 2] {
+		let x = [
+			self.avx2._mm256_unpacklo_epi32(cast!(ab[0]), cast!(ab[1])),
+			self.avx2._mm256_unpackhi_epi32(cast!(ab[0]), cast!(ab[1])),
+		];
+		[
+			cast!(self.avx2._mm256_unpacklo_epi64(x[0], x[1])),
+			cast!(self.avx2._mm256_unpackhi_epi64(x[0], x[1])),
+		]
+	}
+
+	/// Broadcast twiddle factors for stride-1 NTT stages.
+	///
+	/// Given `w = [w0, w1, w2, w3, w4, w5, w6, w7]`, returns `[w0 w4 w1 w5 w2 w6 w3 w7]`.
+	#[inline(always)]
+	pub fn permute1_u32x8(self, w: [u32; 8]) -> u32x8 {
+		let [w0123, w4567]: [u32x4; 2] = cast!(w);
+		let w0415 = self.sse2._mm_unpacklo_epi32(cast!(w0123), cast!(w4567));
+		let w2637 = self.sse2._mm_unpackhi_epi32(cast!(w0123), cast!(w4567));
+		cast!(self.avx._mm256_insertf128_si256::<1>(self.avx._mm256_castsi128_si256(w0415), w2637))
+	}
 }
